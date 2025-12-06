@@ -36,10 +36,24 @@ const loanApplicationSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    
+    // Employment Info (Step 1)
+    employmentType: {
+        type: String,
+        required: true,
+        enum: ['employee', 'self-employed']
+    },
+    
+    // PAN Card Details (Step 1)
     personalEmail: {
         type: String,
         required: true,
         match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    },
+    panCardNumber: {
+        type: String,
+        required: true,
+        match: /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/
     },
 
     // Address Information
@@ -120,6 +134,33 @@ const loanApplicationSchema = new mongoose.Schema({
     totalWorkExperience: {
         type: Number,
         required: true
+    },
+
+    // Business Loan Specific Fields
+    monthlyIncome: {
+        type: Number,
+        default: null
+    },
+    gstRegistered: {
+        type: String,
+        enum: ['yes', 'no', null],
+        default: null
+    },
+    itrReturn: {
+        type: String,
+        enum: ['yes', 'no', null],
+        default: null
+    },
+
+    // Employee Specific Fields (for non-business loans)
+    monthlyInhandSalary: {
+        type: Number,
+        default: null
+    },
+    pfDeduction: {
+        type: String,
+        enum: ['yes', 'no', null],
+        default: null
     },
 
     // Metadata
