@@ -100,7 +100,9 @@ app.post('/api/submit-application', async (req, res) => {
             maritalStatus,
             spouseName,
             motherName,
+            employmentType,
             personalEmail,
+            panCardNumber,
             qualification,
             residenceType,
             currentAddress,
@@ -119,11 +121,18 @@ app.post('/api/submit-application', async (req, res) => {
             designation,
             officialEmail,
             currentWorkExperience,
-            totalWorkExperience
+            totalWorkExperience,
+            // Business loan fields
+            monthlyIncome,
+            gstRegistered,
+            itrReturn,
+            // Employee fields (non-business loans)
+            monthlyInhandSalary,
+            pfDeduction
         } = req.body;
 
         // Validate required fields
-        if (!loanType || !loanAmount || !fullName || !mobileNumber || !personalEmail) {
+        if (!loanType || !loanAmount || !fullName || !mobileNumber || !personalEmail || !panCardNumber) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields'
@@ -139,7 +148,9 @@ app.post('/api/submit-application', async (req, res) => {
             maritalStatus,
             spouseName: maritalStatus === 'married' ? spouseName : null,
             motherName,
+            employmentType,
             personalEmail,
+            panCardNumber: panCardNumber ? panCardNumber.toUpperCase() : null,
             qualification,
             residenceType,
             currentAddress: {
@@ -165,6 +176,13 @@ app.post('/api/submit-application', async (req, res) => {
             officialEmail,
             currentWorkExperience: parseInt(currentWorkExperience),
             totalWorkExperience: parseInt(totalWorkExperience),
+            // Business loan specific
+            monthlyIncome: loanType === 'business-loan' ? parseFloat(monthlyIncome) : null,
+            gstRegistered: loanType === 'business-loan' ? gstRegistered : null,
+            itrReturn: loanType === 'business-loan' ? itrReturn : null,
+            // Employee specific (non-business loans)
+            monthlyInhandSalary: (loanType !== 'business-loan' && employmentType === 'employee') ? parseFloat(monthlyInhandSalary) : null,
+            pfDeduction: (loanType !== 'business-loan' && employmentType === 'employee') ? pfDeduction : null,
             ipAddress: req.ip || req.connection.remoteAddress,
             userAgent: req.get('user-agent')
         });
