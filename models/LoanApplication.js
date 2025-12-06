@@ -41,7 +41,7 @@ const loanApplicationSchema = new mongoose.Schema({
     employmentType: {
         type: String,
         required: true,
-        enum: ['employee', 'self-employed']
+        enum: ['employed', 'self-employed']
     },
     
     // PAN Card Details (Step 1)
