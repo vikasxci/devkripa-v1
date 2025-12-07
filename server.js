@@ -88,7 +88,7 @@ app.get('/apply', (req, res) => {
 
 /**
  * POST /api/submit-application
- * Submit loan application form
+ * Submit loan application form (handles all form types)
  */
 app.post('/api/submit-application', async (req, res) => {
     try {
@@ -128,64 +128,98 @@ app.post('/api/submit-application', async (req, res) => {
             itrReturn,
             // Employee fields (non-business loans)
             monthlyInhandSalary,
-            pfDeduction
+            pfDeduction,
+            // Insurance specific
+            insuranceType,
+            // Bank account specific
+            accountType
         } = req.body;
 
-        // Validate required fields
-        if (!loanType || !loanAmount || !fullName || !mobileNumber || !personalEmail || !panCardNumber) {
+        // Common required fields for all forms
+        if (!loanType || !fullName || !mobileNumber || !personalEmail || !panCardNumber) {
             return res.status(400).json({
                 success: false,
                 message: 'Missing required fields'
             });
         }
 
-        // Create new application
-        const newApplication = new LoanApplication({
+        // Determine form type and create appropriate application object
+        const isSimpleForm = ['insurance', 'bank-account', 'emi-card'].includes(loanType);
+        
+        let applicationData = {
             loanType,
-            loanAmount: parseFloat(loanAmount),
             fullName,
             mobileNumber,
-            maritalStatus,
-            spouseName: maritalStatus === 'married' ? spouseName : null,
-            motherName,
-            employmentType,
             personalEmail,
             panCardNumber: panCardNumber ? panCardNumber.toUpperCase() : null,
-            qualification,
-            residenceType,
-            currentAddress: {
-                address: currentAddress,
-                street: currentStreet,
-                city: currentCity,
-                zipcode: currentZipcode
-            },
-            permanentAddress: {
-                address: permanentAddress,
-                street: permanentStreet,
-                city: permanentCity,
-                zipcode: permanentZipcode
-            },
-            companyName,
-            companyAddress: {
-                address: companyAddress,
-                street: companyStreet,
-                city: companyCity,
-                zipcode: companyZipcode
-            },
-            designation,
-            officialEmail,
-            currentWorkExperience: parseInt(currentWorkExperience),
-            totalWorkExperience: parseInt(totalWorkExperience),
-            // Business loan specific
-            monthlyIncome: loanType === 'business-loan' ? parseFloat(monthlyIncome) : null,
-            gstRegistered: loanType === 'business-loan' ? gstRegistered : null,
-            itrReturn: loanType === 'business-loan' ? itrReturn : null,
-            // Employee specific (non-business loans)
-            monthlyInhandSalary: (loanType !== 'business-loan' && employmentType === 'employee') ? parseFloat(monthlyInhandSalary) : null,
-            pfDeduction: (loanType !== 'business-loan' && employmentType === 'employee') ? pfDeduction : null,
             ipAddress: req.ip || req.connection.remoteAddress,
             userAgent: req.get('user-agent')
-        });
+        };
+
+        if (loanType === 'insurance') {
+            // Insurance Form: Simple fields only
+            applicationData.monthlyIncome = monthlyIncome ? parseFloat(monthlyIncome) : null;
+            applicationData.insuranceType = insuranceType;
+        } else if (loanType === 'bank-account') {
+            // Bank Account Form: Simple fields only
+            applicationData.monthlyIncome = monthlyIncome ? parseFloat(monthlyIncome) : null;
+            applicationData.accountType = accountType;
+        } else if (loanType === 'emi-card') {
+            // EMI Card Form: Simple fields only
+            applicationData.employmentType = employmentType;
+        } else {
+            // Full Loan Application Form (3 Steps)
+            if (!loanAmount) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Loan amount is required'
+                });
+            }
+
+            applicationData = {
+                ...applicationData,
+                loanAmount: parseFloat(loanAmount),
+                maritalStatus,
+                spouseName: maritalStatus === 'married' ? spouseName : null,
+                motherName,
+                employmentType,
+                qualification,
+                residenceType,
+                currentAddress: {
+                    address: currentAddress,
+                    street: currentStreet,
+                    city: currentCity,
+                    zipcode: currentZipcode
+                },
+                permanentAddress: {
+                    address: permanentAddress,
+                    street: permanentStreet,
+                    city: permanentCity,
+                    zipcode: permanentZipcode
+                },
+                companyName,
+                companyAddress: {
+                    address: companyAddress,
+                    street: companyStreet,
+                    city: companyCity,
+                    zipcode: companyZipcode
+                },
+                designation,
+                officialEmail,
+                currentWorkExperience: currentWorkExperience ? parseInt(currentWorkExperience) : null,
+                totalWorkExperience: totalWorkExperience ? parseInt(totalWorkExperience) : null,
+                // Business loan specific
+                monthlyIncome: loanType === 'business-loan' ? parseFloat(monthlyIncome) : null,
+                gstRegistered: loanType === 'business-loan' ? gstRegistered : null,
+                itrReturn: loanType === 'business-loan' ? itrReturn : null,
+                // Employee specific (non-business loans)
+                monthlyInhandSalary: (loanType !== 'business-loan' && employmentType === 'employed') ? parseFloat(monthlyInhandSalary) : null,
+                pfDeduction: (loanType !== 'business-loan' && employmentType === 'employed') ? pfDeduction : null
+            };
+        }
+
+        // Create new application
+        const newApplication = new LoanApplication(applicationData);
 
         // Save to database
         const savedApplication = await newApplication.save();
@@ -194,7 +228,8 @@ app.post('/api/submit-application', async (req, res) => {
             id: savedApplication._id,
             name: fullName,
             email: personalEmail,
-            loanType: loanType
+            loanType: loanType,
+            formType: isSimpleForm ? 'Simple Form' : 'Full Loan Form'
         });
 
         res.status(201).json({
