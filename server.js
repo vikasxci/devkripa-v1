@@ -816,7 +816,7 @@ app.get('/api/career/applications/:id', async (req, res) => {
 
 /**
  * GET /api/career/applications/:id/resume
- * Redirect to Cloudinary resume URL
+ * Redirect to Cloudinary resume URL with proper PDF viewing
  */
 app.get('/api/career/applications/:id/resume', async (req, res) => {
     try {
@@ -829,8 +829,19 @@ app.get('/api/career/applications/:id/resume', async (req, res) => {
             });
         }
 
-        // Redirect to Cloudinary URL for download
-        res.redirect(application.resumeUrl);
+        // For raw files, add fl_attachment for download or redirect directly
+        // Cloudinary raw URLs work for direct download
+        const resumeUrl = application.resumeUrl;
+        
+        // If download parameter is present, force download
+        if (req.query.download === 'true') {
+            // Add fl_attachment to force download
+            const downloadUrl = resumeUrl.replace('/raw/upload/', '/raw/upload/fl_attachment/');
+            return res.redirect(downloadUrl);
+        }
+        
+        // Redirect to Cloudinary URL for viewing
+        res.redirect(resumeUrl);
 
     } catch (error) {
         res.status(500).json({
