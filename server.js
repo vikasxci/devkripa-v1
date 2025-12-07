@@ -4,8 +4,52 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
+const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
 
 const app = express();
+
+// ===========================
+// Cloudinary Configuration
+// ===========================
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Helper function to upload to Cloudinary
+const uploadToCloudinary = (buffer, options) => {
+    return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+            options,
+            (error, result) => {
+                if (error) reject(error);
+                else resolve(result);
+            }
+        );
+        uploadStream.end(buffer);
+    });
+};
+
+// ===========================
+// Multer Configuration for File Uploads
+// ===========================
+const storage = multer.memoryStorage();
+const upload = multer({
+    storage: storage,
+    limits: {
+        fileSize: 5 * 1024 * 1024 // 5MB max
+    },
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+        if (allowedTypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Invalid file type. Only PDF, DOC, and DOCX are allowed.'), false);
+        }
+    }
+});
 
 // ===========================
 // Middleware
@@ -43,6 +87,7 @@ mongoose.connect(mongoUri)
 // Models
 // ===========================
 const LoanApplication = require('./models/LoanApplication');
+const CareerApplication = require('./models/CareerApplication');
 
 // Contact Message Schema (inline for simplicity)
 const contactMessageSchema = new mongoose.Schema({
@@ -609,6 +654,300 @@ app.delete('/api/faqs/:id', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error deleting FAQ',
+            error: error.message
+        });
+    }
+});
+
+// ===========================
+// Career Application Routes
+// ===========================
+
+/**
+ * POST /api/career/apply
+ * Submit career application with resume (uploads to Cloudinary)
+ */
+app.post('/api/career/apply', upload.single('resume'), async (req, res) => {
+    try {
+        const {
+            fullName,
+            email,
+            phone,
+            position,
+            experience,
+            currentSalary,
+            location,
+            qualification,
+            coverLetter
+        } = req.body;
+
+        // Validate required fields
+        if (!fullName || !email || !phone || !position || !experience || !location || !qualification) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please fill all required fields'
+            });
+        }
+
+        // Validate resume file
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please upload your resume'
+            });
+        }
+
+        // Upload resume to Cloudinary
+        const cloudinaryResult = await uploadToCloudinary(req.file.buffer, {
+            folder: 'devkripa-resumes',
+            resource_type: 'raw',
+            public_id: `resume_${Date.now()}_${fullName.replace(/\s+/g, '_')}`,
+            format: req.file.originalname.split('.').pop()
+        });
+
+        // Create career application with Cloudinary URL
+        const careerApplication = new CareerApplication({
+            fullName,
+            email,
+            phone,
+            position,
+            experience,
+            currentSalary: currentSalary ? parseFloat(currentSalary) : null,
+            location,
+            qualification,
+            resumeFileName: req.file.originalname,
+            resumeUrl: cloudinaryResult.secure_url,
+            resumePublicId: cloudinaryResult.public_id,
+            coverLetter: coverLetter || ''
+        });
+
+        await careerApplication.save();
+
+        res.status(201).json({
+            success: true,
+            message: 'Application submitted successfully',
+            applicationId: careerApplication._id
+        });
+
+    } catch (error) {
+        console.error('Career application error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error submitting application',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/career/applications
+ * Get all career applications (Admin)
+ */
+app.get('/api/career/applications', async (req, res) => {
+    try {
+        const { status, position, search } = req.query;
+        let filter = {};
+
+        if (status) filter.status = status;
+        if (position) filter.position = position;
+        if (search) {
+            filter.$or = [
+                { fullName: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } },
+                { phone: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        const applications = await CareerApplication.find(filter)
+            .select('-resumeData') // Exclude large base64 data for listing
+            .sort({ appliedAt: -1 });
+
+        res.json({
+            success: true,
+            count: applications.length,
+            applications
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching applications',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/career/applications/:id
+ * Get single career application with resume (Admin)
+ */
+app.get('/api/career/applications/:id', async (req, res) => {
+    try {
+        const application = await CareerApplication.findById(req.params.id);
+
+        if (!application) {
+            return res.status(404).json({
+                success: false,
+                message: 'Application not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            application
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching application',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/career/applications/:id/resume
+ * Redirect to Cloudinary resume URL
+ */
+app.get('/api/career/applications/:id/resume', async (req, res) => {
+    try {
+        const application = await CareerApplication.findById(req.params.id);
+
+        if (!application) {
+            return res.status(404).json({
+                success: false,
+                message: 'Application not found'
+            });
+        }
+
+        // Redirect to Cloudinary URL for download
+        res.redirect(application.resumeUrl);
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error downloading resume',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * PUT /api/career/applications/:id
+ * Update career application status (Admin)
+ */
+app.put('/api/career/applications/:id', async (req, res) => {
+    try {
+        const { status, notes } = req.body;
+
+        const application = await CareerApplication.findByIdAndUpdate(
+            req.params.id,
+            { status, notes, updatedAt: new Date() },
+            { new: true }
+        );
+
+        if (!application) {
+            return res.status(404).json({
+                success: false,
+                message: 'Application not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Application updated successfully',
+            application
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error updating application',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/career/applications/:id
+ * Delete career application and resume from Cloudinary (Admin)
+ */
+app.delete('/api/career/applications/:id', async (req, res) => {
+    try {
+        const application = await CareerApplication.findById(req.params.id);
+
+        if (!application) {
+            return res.status(404).json({
+                success: false,
+                message: 'Application not found'
+            });
+        }
+
+        // Delete resume from Cloudinary
+        if (application.resumePublicId) {
+            try {
+                await cloudinary.uploader.destroy(application.resumePublicId, { resource_type: 'raw' });
+            } catch (cloudinaryError) {
+                console.error('Error deleting from Cloudinary:', cloudinaryError);
+                // Continue with deletion even if Cloudinary delete fails
+            }
+        }
+
+        // Delete from database
+        await CareerApplication.findByIdAndDelete(req.params.id);
+
+        res.json({
+            success: true,
+            message: 'Application deleted successfully'
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error deleting application',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/career/stats
+ * Get career applications statistics (Admin)
+ */
+app.get('/api/career/stats', async (req, res) => {
+    try {
+        const total = await CareerApplication.countDocuments();
+        const newCount = await CareerApplication.countDocuments({ status: 'new' });
+        const reviewedCount = await CareerApplication.countDocuments({ status: 'reviewed' });
+        const shortlistedCount = await CareerApplication.countDocuments({ status: 'shortlisted' });
+        const interviewCount = await CareerApplication.countDocuments({ status: 'interview-scheduled' });
+        const selectedCount = await CareerApplication.countDocuments({ status: 'selected' });
+        const rejectedCount = await CareerApplication.countDocuments({ status: 'rejected' });
+
+        // Get applications by position
+        const byPosition = await CareerApplication.aggregate([
+            { $group: { _id: '$position', count: { $sum: 1 } } }
+        ]);
+
+        res.json({
+            success: true,
+            stats: {
+                total,
+                new: newCount,
+                reviewed: reviewedCount,
+                shortlisted: shortlistedCount,
+                interviewScheduled: interviewCount,
+                selected: selectedCount,
+                rejected: rejectedCount,
+                byPosition
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching stats',
             error: error.message
         });
     }
