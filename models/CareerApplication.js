@@ -77,9 +77,8 @@ const careerApplicationSchema = new mongoose.Schema({
 });
 
 // Update timestamp on save
-careerApplicationSchema.pre('save', function(next) {
+careerApplicationSchema.pre('save', function() {
     this.updatedAt = new Date();
-    next();
 });
 
 module.exports = mongoose.model('CareerApplication', careerApplicationSchema);
