@@ -706,14 +706,12 @@ app.post('/api/career/apply', upload.single('resume'), async (req, res) => {
         }
 
         // Upload resume to Cloudinary
-        // Use 'auto' resource_type for better PDF handling
+        // Use 'raw' resource_type for documents (PDF, DOC, DOCX)
         const fileExt = req.file.originalname.split('.').pop().toLowerCase();
         const cloudinaryResult = await uploadToCloudinary(req.file.buffer, {
             folder: 'devkripa-resumes',
-            resource_type: 'auto',
-            public_id: `resume_${Date.now()}_${fullName.replace(/\s+/g, '_')}`,
-            format: fileExt,
-            flags: 'attachment:false'  // Allow inline viewing
+            resource_type: 'raw',
+            public_id: `resume_${Date.now()}_${fullName.replace(/\s+/g, '_')}.${fileExt}`
         });
 
         // Create career application with Cloudinary URL
@@ -909,10 +907,7 @@ app.delete('/api/career/applications/:id', async (req, res) => {
         // Delete resume from Cloudinary
         if (application.resumePublicId) {
             try {
-                // Try deleting with different resource types (auto uploaded files may vary)
-                await cloudinary.uploader.destroy(application.resumePublicId, { resource_type: 'raw' })
-                    .catch(() => cloudinary.uploader.destroy(application.resumePublicId, { resource_type: 'image' }))
-                    .catch(() => cloudinary.uploader.destroy(application.resumePublicId, { resource_type: 'auto' }));
+                await cloudinary.uploader.destroy(application.resumePublicId, { resource_type: 'raw' });
             } catch (cloudinaryError) {
                 console.error('Error deleting from Cloudinary:', cloudinaryError);
                 // Continue with deletion even if Cloudinary delete fails
