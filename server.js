@@ -62,8 +62,10 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
 
-// Serve static files from public folder
-app.use(express.static(path.join(__dirname, '../public')));
+// Serve static files from public folder (only in development)
+if (process.env.NODE_ENV !== 'production') {
+    app.use(express.static(path.join(__dirname, '../public')));
+}
 
 // ===========================
 // Database Connection
@@ -117,14 +119,20 @@ const FAQ = mongoose.model('FAQ', faqSchema);
 // Routes
 // ===========================
 
-// Home route
+// Health check / API info route
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// Application form page
-app.get('/apply', (req, res) => {
-    res.sendFile(path.join(__dirname, 'apply.html'));
+    res.json({
+        success: true,
+        message: 'DevKripa Fincrop API Server',
+        version: '1.0.0',
+        endpoints: {
+            applications: '/api/applications',
+            contact: '/api/contact-messages',
+            faqs: '/api/faqs',
+            career: '/api/career/applications',
+            statistics: '/api/statistics'
+        }
+    });
 });
 
 // ===========================
