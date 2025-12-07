@@ -4,15 +4,11 @@ const mongoose = require('mongoose');
 // Loan Application Schema
 // ===========================
 const loanApplicationSchema = new mongoose.Schema({
-    // Personal Information
+    // Common Fields (required for all forms)
     loanType: {
         type: String,
         required: true,
         enum: ['personal-loan', 'business-loan', 'instant-loan', 'car-loan', 'credit-card', 'emi-card', 'insurance', 'bank-account']
-    },
-    loanAmount: {
-        type: Number,
-        required: true
     },
     fullName: {
         type: String,
@@ -23,28 +19,6 @@ const loanApplicationSchema = new mongoose.Schema({
         required: true,
         match: /^[0-9]{10}$/
     },
-    maritalStatus: {
-        type: String,
-        required: true,
-        enum: ['single', 'married', 'divorced', 'widowed']
-    },
-    spouseName: {
-        type: String,
-        default: null
-    },
-    motherName: {
-        type: String,
-        required: true
-    },
-    
-    // Employment Info (Step 1)
-    employmentType: {
-        type: String,
-        required: true,
-        enum: ['employed', 'self-employed']
-    },
-    
-    // PAN Card Details (Step 1)
     personalEmail: {
         type: String,
         required: true,
@@ -56,91 +30,121 @@ const loanApplicationSchema = new mongoose.Schema({
         match: /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/
     },
 
-    // Address Information
-    qualification: {
+    // ==========================================
+    // INSURANCE FORM SPECIFIC FIELDS
+    // ==========================================
+    insuranceType: {
         type: String,
-        required: true,
-        enum: ['10th', '12th', 'graduation', 'post-graduation', 'diploma']
-    },
-    residenceType: {
-        type: String,
-        required: true,
-        enum: ['owned', 'rented', 'company-provided', 'family']
-    },
-    currentAddress: {
-        address: {
-            type: String,
-            required: true
-        },
-        street: String,
-        city: {
-            type: String,
-            required: true
-        },
-        zipcode: {
-            type: String,
-            required: true
-        }
-    },
-    permanentAddress: {
-        address: {
-            type: String,
-            required: true
-        },
-        street: String,
-        city: {
-            type: String,
-            required: true
-        },
-        zipcode: {
-            type: String,
-            required: true
-        }
+        enum: ['life-insurance', 'health-insurance', 'vehicle-insurance', null],
+        default: null
     },
 
-    // Employment Information
+    // ==========================================
+    // BANK ACCOUNT FORM SPECIFIC FIELDS
+    // ==========================================
+    accountType: {
+        type: String,
+        enum: ['savings-account', 'current-account', 'salary-account', null],
+        default: null
+    },
+
+    // ==========================================
+    // LOAN FORM FIELDS (3-Step Form)
+    // ==========================================
+    
+    // Loan Amount (required only for loans, not for insurance/bank/emi)
+    loanAmount: {
+        type: Number,
+        default: null
+    },
+    
+    // Marital Status (loan forms only)
+    maritalStatus: {
+        type: String,
+        enum: ['single', 'married', 'divorced', 'widowed', null],
+        default: null
+    },
+    spouseName: {
+        type: String,
+        default: null
+    },
+    motherName: {
+        type: String,
+        default: null
+    },
+    
+    // Employment Type (used by loans and EMI card)
+    employmentType: {
+        type: String,
+        enum: ['employed', 'self-employed', null],
+        default: null
+    },
+
+    // Qualification (loan forms only)
+    qualification: {
+        type: String,
+        enum: ['10th', '12th', 'graduation', 'post-graduation', 'diploma', null],
+        default: null
+    },
+    
+    // Residence Type (loan forms only)
+    residenceType: {
+        type: String,
+        enum: ['owned', 'rented', 'company-provided', 'family', null],
+        default: null
+    },
+    
+    // Current Address (loan forms only)
+    currentAddress: {
+        address: { type: String, default: null },
+        street: { type: String, default: null },
+        city: { type: String, default: null },
+        zipcode: { type: String, default: null }
+    },
+    
+    // Permanent Address (loan forms only)
+    permanentAddress: {
+        address: { type: String, default: null },
+        street: { type: String, default: null },
+        city: { type: String, default: null },
+        zipcode: { type: String, default: null }
+    },
+
+    // Company Information (loan forms only)
     companyName: {
         type: String,
-        required: true
+        default: null
     },
     companyAddress: {
-        address: {
-            type: String,
-            required: true
-        },
-        street: String,
-        city: {
-            type: String,
-            required: true
-        },
-        zipcode: {
-            type: String,
-            required: true
-        }
+        address: { type: String, default: null },
+        street: { type: String, default: null },
+        city: { type: String, default: null },
+        zipcode: { type: String, default: null }
     },
     designation: {
         type: String,
-        required: true
+        default: null
     },
     officialEmail: {
         type: String,
-        required: true,
-        match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        default: null
     },
     currentWorkExperience: {
         type: Number,
-        required: true
+        default: null
     },
     totalWorkExperience: {
         type: Number,
-        required: true
+        default: null
     },
 
-    // Business Loan Specific Fields
+    // Monthly Income (used by business loans, insurance, bank account)
     monthlyIncome: {
         type: Number,
         default: null
     },
+    
+    // Business Loan Specific Fields
     gstRegistered: {
         type: String,
         enum: ['yes', 'no', null],
