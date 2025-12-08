@@ -145,6 +145,11 @@ const loanApplicationSchema = new mongoose.Schema({
     },
     
     // Business Loan Specific Fields
+    businessVintage: {
+        type: String,
+        enum: ['0-1', '1-2', '2-3', '3-5', '5-10', '10+', null],
+        default: null
+    },
     gstRegistered: {
         type: String,
         enum: ['yes', 'no', null],
