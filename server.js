@@ -744,14 +744,13 @@ app.post('/api/career/apply', upload.single('resume'), async (req, res) => {
             });
         }
 
-        // Upload resume to Cloudinary using unsigned preset for public access
+        // Upload resume to Cloudinary (signed upload with API credentials)
         const fileExt = req.file.originalname.split('.').pop().toLowerCase();
         const publicId = `resume_${Date.now()}_${fullName.replace(/\s+/g, '_')}.${fileExt}`;
         const cloudinaryResult = await uploadToCloudinary(req.file.buffer, {
             folder: 'resumes',
             resource_type: 'raw',
-            public_id: publicId,
-            upload_preset: 'resume_uploads'
+            public_id: publicId
         });
 
         // Create career application with Cloudinary URL
@@ -1419,6 +1418,42 @@ app.put('/api/admin/users/:id/status', authenticateToken, isSuperAdmin, async (r
         res.status(500).json({
             success: false,
             message: 'Error updating user status',
+            error: error.message
+        });
+    }
+});
+
+// Delete User (Super Admin only)
+app.delete('/api/admin/users/:id', authenticateToken, isSuperAdmin, async (req, res) => {
+    try {
+        const user = await AdminUser.findById(req.params.id);
+        
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        // Prevent deleting super admin
+        if (user.role === 'super-admin') {
+            return res.status(403).json({
+                success: false,
+                message: 'Cannot delete Super Admin account'
+            });
+        }
+
+        await AdminUser.findByIdAndDelete(req.params.id);
+
+        res.json({
+            success: true,
+            message: 'User deleted successfully'
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error deleting user',
             error: error.message
         });
     }
