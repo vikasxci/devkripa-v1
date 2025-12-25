@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 
 // ===========================
 // Admin User Schema
-// ===========================
+// =========================== 
 const adminUserSchema = new mongoose.Schema({
     fullName: {
         type: String,
