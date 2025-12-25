@@ -6,7 +6,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
- 
+
 const app = express();
 
 // ===========================
@@ -435,6 +435,53 @@ app.put('/api/applications/:id/status', async (req, res) => {
         res.json({
             success: true,
             message: 'Status updated successfully',
+            data: application
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error updating application',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * PUT /api/applications/:id
+ * Update loan application details
+ */
+app.put('/api/applications/:id', async (req, res) => {
+    try {
+        const updateData = req.body;
+        
+        // Validate required fields
+        if (!updateData.fullName || !updateData.mobileNumber || !updateData.personalEmail || !updateData.panCardNumber) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required fields'
+            });
+        }
+
+        // Find and update application
+        const application = await LoanApplication.findByIdAndUpdate(
+            req.params.id,
+            { 
+                ...updateData,
+                panCardNumber: updateData.panCardNumber.toUpperCase()
+            },
+            { new: true, runValidators: true }
+        );
+
+        if (!application) {
+            return res.status(404).json({
+                success: false,
+                message: 'Application not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Application updated successfully',
             data: application
         });
     } catch (error) {
@@ -1138,6 +1185,87 @@ app.post('/api/admin/register', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Error during registration',
+            error: error.message
+        });
+    }
+});
+
+// Create User by Super Admin (No Approval Required)
+app.post('/api/admin/create-user', authenticateToken, isSuperAdmin, async (req, res) => {
+    try {
+        const { fullName, email, password, phone, role, status } = req.body;
+
+        // Validation
+        if (!fullName || !email || !password || !phone) {
+            return res.status(400).json({
+                success: false,
+                message: 'All fields are required'
+            });
+        }
+
+        // Check if email already exists
+        const existingUser = await AdminUser.findOne({ email: email.toLowerCase() });
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email already registered'
+            });
+        }
+
+        // Validate password strength
+        if (password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters'
+            });
+        }
+
+        // Validate role
+        if (!['admin', 'super-admin'].includes(role)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid role'
+            });
+        }
+
+        // Validate status
+        if (!['active', 'inactive'].includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid status'
+            });
+        }
+
+        // Create new admin user (directly active/inactive, no pending)
+        const newAdmin = new AdminUser({
+            fullName,
+            email: email.toLowerCase(),
+            password,
+            phone,
+            role: role || 'admin',
+            status: status || 'active',
+            approvedBy: req.user.id,
+            approvedAt: new Date()
+        });
+
+        await newAdmin.save();
+
+        res.status(201).json({
+            success: true,
+            message: 'User created successfully',
+            data: {
+                id: newAdmin._id,
+                fullName: newAdmin.fullName,
+                email: newAdmin.email,
+                role: newAdmin.role,
+                status: newAdmin.status
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error creating user',
             error: error.message
         });
     }
