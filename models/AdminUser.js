@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 
 // ===========================
 // Admin User Schema
-// =========================== 
+// ===========================
 const adminUserSchema = new mongoose.Schema({
     fullName: {
         type: String,
@@ -56,6 +56,10 @@ const adminUserSchema = new mongoose.Schema({
     approvedAt: {
         type: Date,
         default: null
+    },
+    isMasterAdmin: {
+        type: Boolean,
+        default: false
     }
 });
 
