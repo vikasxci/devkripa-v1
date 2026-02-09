@@ -81,6 +81,8 @@ mongoose.connect(mongoUri)
         
         // Create default super admin if none exists
         await createDefaultSuperAdmin();
+        // Create master admin if not exists
+        await createMasterAdmin();
     })
     .catch((err) => {
         console.error('❌ MongoDB Connection Error:', err.message);
@@ -117,12 +119,41 @@ async function createDefaultSuperAdmin() {
     }
 }
 
+// Function to create master admin (special elevated access)
+async function createMasterAdmin() {
+    try {
+        const AdminUser = require('./models/AdminUser');
+        const existingMasterAdmin = await AdminUser.findOne({ email: 'vikas.master@gmail.com' });
+        
+        if (!existingMasterAdmin) {
+            const masterAdmin = new AdminUser({
+                fullName: 'Master Admin',
+                email: 'vikas.master@gmail.com',
+                password: 'Vikas@master.com',
+                phone: '0000000000',
+                role: 'super-admin',
+                status: 'active'
+            });
+            
+            await masterAdmin.save();
+            console.log('✅ Master Admin created:');
+            console.log('   Email: vikas.master@gmail.com');
+            console.log('   Password: Vikas@master.com');
+        } else {
+            console.log('ℹ️  Master Admin already exists');
+        }
+    } catch (error) {
+        console.error('❌ Error creating master admin:', error.message);
+    }
+}
+
 // ===========================
 // Models
 // ===========================
 const LoanApplication = require('./models/LoanApplication');
 const CareerApplication = require('./models/CareerApplication');
 const AdminUser = require('./models/AdminUser');
+const Visitor = require('./models/Visitor');
 const jwt = require('jsonwebtoken');
 
 // JWT Secret (should be in .env file)
@@ -1667,6 +1698,641 @@ app.get('/api/admin/users/stats', authenticateToken, isSuperAdmin, async (req, r
         res.status(500).json({
             success: false,
             message: 'Error fetching stats',
+            error: error.message
+        });
+    }
+});
+
+// ===========================
+// Visitor Tracking API Routes
+// ===========================
+
+/**
+ * POST /api/visitors/track
+ * Track visitor data (called from frontend tracking script)
+ */
+app.post('/api/visitors/track', async (req, res) => {
+    try {
+        const {
+            sessionId,
+            visitorId,
+            device,
+            trafficSource,
+            pageView,
+            interaction,
+            conversion,
+            location,
+            identificationData,
+            isBot
+        } = req.body;
+
+        if (!sessionId || !visitorId) {
+            return res.status(400).json({
+                success: false,
+                message: 'sessionId and visitorId are required'
+            });
+        }
+
+        // Get IP address
+        const ipAddress = req.headers['x-forwarded-for']?.split(',')[0] || 
+                          req.connection?.remoteAddress || 
+                          req.socket?.remoteAddress ||
+                          req.ip ||
+                          'Unknown';
+
+        // Find existing visitor session or create new one
+        let visitor = await Visitor.findOne({ sessionId });
+        
+        if (!visitor) {
+            // Check if this is a returning visitor
+            const existingVisitor = await Visitor.findOne({ visitorId }).sort({ createdAt: -1 });
+            const visitCount = existingVisitor ? existingVisitor.visitCount + 1 : 1;
+            const visitorType = existingVisitor ? 'returning' : 'new';
+            
+            visitor = new Visitor({
+                sessionId,
+                visitorId,
+                ipAddress,
+                visitorType,
+                visitCount,
+                firstVisit: existingVisitor ? existingVisitor.firstVisit : new Date(),
+                device: device || {},
+                trafficSource: trafficSource || {},
+                location: location || {},
+                isBot: isBot || false,
+                pageViews: [],
+                interactions: [],
+                conversions: []
+            });
+
+            // Set entry page if page view is provided
+            if (pageView) {
+                visitor.entryPage = pageView.url;
+                visitor.pageViews.push({
+                    url: pageView.url,
+                    title: pageView.title || '',
+                    timestamp: new Date(),
+                    timeSpent: 0,
+                    scrollDepth: pageView.scrollDepth || 0
+                });
+                visitor.totalPageViews = 1;
+            }
+        } else {
+            // Update existing session
+            visitor.lastVisit = new Date();
+            visitor.isActive = true;
+            
+            // Update device info if provided
+            if (device) {
+                visitor.device = { ...visitor.device.toObject(), ...device };
+            }
+            
+            // Update location if provided
+            if (location) {
+                visitor.location = { ...visitor.location.toObject(), ...location };
+            }
+            
+            // Add page view
+            if (pageView) {
+                // Check if this is an update to existing page view or new page
+                const existingPageIndex = visitor.pageViews.findIndex(
+                    pv => pv.url === pageView.url && 
+                    (new Date() - new Date(pv.timestamp)) < 5 * 60 * 1000 // within 5 minutes
+                );
+                
+                if (existingPageIndex !== -1) {
+                    // Update existing page view
+                    visitor.pageViews[existingPageIndex].timeSpent = pageView.timeSpent || 0;
+                    visitor.pageViews[existingPageIndex].scrollDepth = pageView.scrollDepth || 0;
+                } else {
+                    // Add new page view
+                    visitor.pageViews.push({
+                        url: pageView.url,
+                        title: pageView.title || '',
+                        timestamp: new Date(),
+                        timeSpent: pageView.timeSpent || 0,
+                        scrollDepth: pageView.scrollDepth || 0
+                    });
+                    visitor.totalPageViews = visitor.pageViews.length;
+                }
+                
+                visitor.exitPage = pageView.url;
+                
+                // Update max scroll depth
+                if (pageView.scrollDepth && pageView.scrollDepth > visitor.maxScrollDepth) {
+                    visitor.maxScrollDepth = pageView.scrollDepth;
+                }
+            }
+            
+            // Add interaction
+            if (interaction) {
+                visitor.interactions.push({
+                    type: interaction.type,
+                    element: interaction.element,
+                    page: interaction.page,
+                    timestamp: new Date(),
+                    data: interaction.data
+                });
+            }
+            
+            // Add conversion
+            if (conversion) {
+                visitor.conversions.push({
+                    type: conversion.type,
+                    page: conversion.page,
+                    timestamp: new Date(),
+                    data: conversion.data
+                });
+            }
+            
+            // Update identification data
+            if (identificationData) {
+                visitor.identified = true;
+                visitor.identificationData = {
+                    ...visitor.identificationData.toObject(),
+                    ...identificationData
+                };
+            }
+            
+            // Calculate total time on site
+            const sessionDuration = Math.floor((new Date() - visitor.sessionStart) / 1000);
+            visitor.totalTimeOnSite = sessionDuration;
+        }
+
+        await visitor.save();
+
+        res.json({
+            success: true,
+            message: 'Visitor data tracked successfully',
+            visitorId: visitor._id
+        });
+
+    } catch (error) {
+        console.error('Visitor tracking error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error tracking visitor',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/visitors/heartbeat
+ * Update visitor session status (keep-alive)
+ */
+app.post('/api/visitors/heartbeat', async (req, res) => {
+    try {
+        const { sessionId, timeSpent, scrollDepth, currentPage } = req.body;
+        
+        if (!sessionId) {
+            return res.status(400).json({
+                success: false,
+                message: 'sessionId is required'
+            });
+        }
+
+        const visitor = await Visitor.findOne({ sessionId });
+        
+        if (visitor) {
+            visitor.isActive = true;
+            visitor.lastVisit = new Date();
+            visitor.totalTimeOnSite = Math.floor((new Date() - visitor.sessionStart) / 1000);
+            
+            if (scrollDepth && scrollDepth > visitor.maxScrollDepth) {
+                visitor.maxScrollDepth = scrollDepth;
+            }
+            
+            // Update current page time spent and scroll depth
+            if (currentPage && visitor.pageViews.length > 0) {
+                const lastPageIndex = visitor.pageViews.findIndex(
+                    pv => pv.url === currentPage
+                );
+                if (lastPageIndex !== -1) {
+                    visitor.pageViews[lastPageIndex].timeSpent = timeSpent || 0;
+                    visitor.pageViews[lastPageIndex].scrollDepth = scrollDepth || 0;
+                }
+            }
+            
+            await visitor.save();
+        }
+
+        res.json({ success: true });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error updating heartbeat',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/visitors/end-session
+ * Mark session as ended
+ */
+app.post('/api/visitors/end-session', async (req, res) => {
+    try {
+        const { sessionId, timeSpent, scrollDepth } = req.body;
+        
+        if (!sessionId) {
+            return res.status(400).json({
+                success: false,
+                message: 'sessionId is required'
+            });
+        }
+
+        const visitor = await Visitor.findOne({ sessionId });
+        
+        if (visitor) {
+            visitor.isActive = false;
+            visitor.sessionEnd = new Date();
+            visitor.totalTimeOnSite = Math.floor((visitor.sessionEnd - visitor.sessionStart) / 1000);
+            
+            if (scrollDepth && scrollDepth > visitor.maxScrollDepth) {
+                visitor.maxScrollDepth = scrollDepth;
+            }
+            
+            await visitor.save();
+        }
+
+        res.json({ success: true });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error ending session',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/visitors
+ * Get all visitors (Admin only)
+ */
+app.get('/api/visitors', async (req, res) => {
+    try {
+        const { 
+            page = 1, 
+            limit = 50, 
+            startDate, 
+            endDate,
+            deviceType,
+            country,
+            source,
+            visitorType,
+            isBot,
+            identified
+        } = req.query;
+        
+        let filter = {};
+        
+        // Date filter
+        if (startDate || endDate) {
+            filter.createdAt = {};
+            if (startDate) filter.createdAt.$gte = new Date(startDate);
+            if (endDate) filter.createdAt.$lte = new Date(endDate);
+        }
+        
+        // Device type filter
+        if (deviceType && deviceType !== 'all') {
+            filter['device.type'] = deviceType;
+        }
+        
+        // Country filter
+        if (country && country !== 'all') {
+            filter['location.country'] = country;
+        }
+        
+        // Source filter
+        if (source && source !== 'all') {
+            filter['trafficSource.source'] = source;
+        }
+        
+        // Visitor type filter
+        if (visitorType && visitorType !== 'all') {
+            filter.visitorType = visitorType;
+        }
+        
+        // Bot filter
+        if (isBot !== undefined) {
+            filter.isBot = isBot === 'true';
+        }
+        
+        // Identified filter
+        if (identified !== undefined) {
+            filter.identified = identified === 'true';
+        }
+        
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        
+        const visitors = await Visitor.find(filter)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(parseInt(limit))
+            .select('-interactions'); // Exclude detailed interactions for list view
+        
+        const total = await Visitor.countDocuments(filter);
+        
+        res.json({
+            success: true,
+            count: visitors.length,
+            total,
+            page: parseInt(page),
+            totalPages: Math.ceil(total / parseInt(limit)),
+            data: visitors
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching visitors',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/visitors/stats
+ * Get visitor statistics (Admin only)
+ */
+app.get('/api/visitors/stats', async (req, res) => {
+    try {
+        const { startDate, endDate } = req.query;
+        
+        let dateFilter = {};
+        if (startDate || endDate) {
+            dateFilter.createdAt = {};
+            if (startDate) dateFilter.createdAt.$gte = new Date(startDate);
+            if (endDate) dateFilter.createdAt.$lte = new Date(endDate);
+        }
+        
+        // Total visitors
+        const totalVisitors = await Visitor.countDocuments({ ...dateFilter, isBot: false });
+        
+        // Unique visitors (by visitorId)
+        const uniqueVisitors = await Visitor.distinct('visitorId', { ...dateFilter, isBot: false });
+        
+        // Active sessions (active within last 5 minutes)
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+        const activeSessions = await Visitor.countDocuments({
+            isActive: true,
+            lastVisit: { $gte: fiveMinutesAgo },
+            isBot: false
+        });
+        
+        // New vs returning
+        const newVisitors = await Visitor.countDocuments({ ...dateFilter, visitorType: 'new', isBot: false });
+        const returningVisitors = await Visitor.countDocuments({ ...dateFilter, visitorType: 'returning', isBot: false });
+        
+        // Device breakdown
+        const deviceStats = await Visitor.aggregate([
+            { $match: { ...dateFilter, isBot: false } },
+            { $group: { _id: '$device.type', count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+        ]);
+        
+        // Traffic source breakdown
+        const sourceStats = await Visitor.aggregate([
+            { $match: { ...dateFilter, isBot: false } },
+            { $group: { _id: '$trafficSource.source', count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+        ]);
+        
+        // Country breakdown
+        const countryStats = await Visitor.aggregate([
+            { $match: { ...dateFilter, isBot: false } },
+            { $group: { _id: '$location.country', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 10 }
+        ]);
+        
+        // Browser breakdown
+        const browserStats = await Visitor.aggregate([
+            { $match: { ...dateFilter, isBot: false } },
+            { $group: { _id: '$device.browser', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 10 }
+        ]);
+        
+        // Average session duration
+        const avgDuration = await Visitor.aggregate([
+            { $match: { ...dateFilter, isBot: false, totalTimeOnSite: { $gt: 0 } } },
+            { $group: { _id: null, avg: { $avg: '$totalTimeOnSite' } } }
+        ]);
+        
+        // Average pages per session
+        const avgPages = await Visitor.aggregate([
+            { $match: { ...dateFilter, isBot: false } },
+            { $group: { _id: null, avg: { $avg: '$totalPageViews' } } }
+        ]);
+        
+        // Bounce rate (sessions with only 1 page view)
+        const singlePageSessions = await Visitor.countDocuments({ ...dateFilter, isBot: false, totalPageViews: 1 });
+        const bounceRate = totalVisitors > 0 ? Math.round((singlePageSessions / totalVisitors) * 100) : 0;
+        
+        // Conversions
+        const conversions = await Visitor.aggregate([
+            { $match: { ...dateFilter, isBot: false, 'conversions.0': { $exists: true } } },
+            { $unwind: '$conversions' },
+            { $group: { _id: '$conversions.type', count: { $sum: 1 } } },
+            { $sort: { count: -1 } }
+        ]);
+        
+        // Popular pages
+        const popularPages = await Visitor.aggregate([
+            { $match: { ...dateFilter, isBot: false } },
+            { $unwind: '$pageViews' },
+            { $group: { _id: '$pageViews.url', views: { $sum: 1 }, avgTime: { $avg: '$pageViews.timeSpent' } } },
+            { $sort: { views: -1 } },
+            { $limit: 10 }
+        ]);
+        
+        // Identified visitors
+        const identifiedCount = await Visitor.countDocuments({ ...dateFilter, identified: true, isBot: false });
+        
+        // Bots detected
+        const botsDetected = await Visitor.countDocuments({ ...dateFilter, isBot: true });
+        
+        // Visitors by hour (for today)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const hourlyStats = await Visitor.aggregate([
+            { $match: { createdAt: { $gte: today }, isBot: false } },
+            { $group: { 
+                _id: { $hour: '$createdAt' },
+                count: { $sum: 1 }
+            }},
+            { $sort: { _id: 1 } }
+        ]);
+        
+        // Visitors by day (last 7 days)
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const dailyStats = await Visitor.aggregate([
+            { $match: { createdAt: { $gte: sevenDaysAgo }, isBot: false } },
+            { $group: { 
+                _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                count: { $sum: 1 }
+            }},
+            { $sort: { _id: 1 } }
+        ]);
+
+        res.json({
+            success: true,
+            stats: {
+                totalVisitors,
+                uniqueVisitors: uniqueVisitors.length,
+                activeSessions,
+                newVisitors,
+                returningVisitors,
+                identifiedCount,
+                botsDetected,
+                bounceRate,
+                avgSessionDuration: avgDuration[0]?.avg || 0,
+                avgPagesPerSession: avgPages[0]?.avg || 0,
+                deviceStats,
+                sourceStats,
+                countryStats,
+                browserStats,
+                conversions,
+                popularPages,
+                hourlyStats,
+                dailyStats
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching visitor stats',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/visitors/:id
+ * Get single visitor details (Admin only)
+ */
+app.get('/api/visitors/:id', async (req, res) => {
+    try {
+        const visitor = await Visitor.findById(req.params.id);
+        
+        if (!visitor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Visitor not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: visitor
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching visitor',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * PUT /api/visitors/:id/notes
+ * Update visitor notes (Admin only)
+ */
+app.put('/api/visitors/:id/notes', async (req, res) => {
+    try {
+        const { notes } = req.body;
+        
+        const visitor = await Visitor.findByIdAndUpdate(
+            req.params.id,
+            { adminNotes: notes },
+            { new: true }
+        );
+        
+        if (!visitor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Visitor not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Notes updated successfully',
+            data: visitor
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error updating notes',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/visitors/:id
+ * Delete visitor record (Admin only)
+ */
+app.delete('/api/visitors/:id', async (req, res) => {
+    try {
+        const visitor = await Visitor.findByIdAndDelete(req.params.id);
+        
+        if (!visitor) {
+            return res.status(404).json({
+                success: false,
+                message: 'Visitor not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Visitor record deleted successfully'
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error deleting visitor',
+            error: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/visitors/active/realtime
+ * Get currently active visitors (Real-time)
+ */
+app.get('/api/visitors/active/realtime', async (req, res) => {
+    try {
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+        
+        const activeVisitors = await Visitor.find({
+            isActive: true,
+            lastVisit: { $gte: fiveMinutesAgo },
+            isBot: false
+        })
+        .select('visitorId device.type device.browser location.country location.city trafficSource.source pageViews exitPage totalTimeOnSite')
+        .sort({ lastVisit: -1 })
+        .limit(50);
+
+        res.json({
+            success: true,
+            count: activeVisitors.length,
+            data: activeVisitors
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching active visitors',
             error: error.message
         });
     }
